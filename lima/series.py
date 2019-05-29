@@ -1,4 +1,5 @@
-import lima as lm
+from lima.config import *
+from lima.time import *
 import io
 import redis
 import json
@@ -6,7 +7,6 @@ import struct
 import pandas as pd
 import numpy as np
 import datetime
-from collections import namedtuple
 
 __all__ = ['read_series','write_series', 'delete_series']
 
@@ -16,18 +16,18 @@ _METADATA_FORMAT = '<6s6sl'
 _METADATA_SIZE = struct.calcsize(_METADATA_FORMAT)
 
 class Metadata:
-    __slots__ = 'type','periodicity','start_index','end_index'
+    __slots__ = 'type','periodicity_code','start_index','end_index'
 
     @classmethod
     def read(cls, key):
-        r = redis.Redis(connection_pool=lm.REDIS_POOL)
+        r = redis.Redis(connection_pool=REDIS_POOL)
         meta_data = r.getrange(key,0,_METADATA_SIZE-1)
         if len(meta_data) == 0:
             return None
         s = struct.unpack(_METADATA_FORMAT, meta_data)
         md = cls()
         md.type = np.dtype(s[0].decode().strip())
-        md.periodicity = lm.get_periodicity(s[1].decode().strip())
+        md.periodicity_code = s[1].decode().strip()
         md.start_index = s[2]
         md.end_index = md.start_index + (int(r.strlen(key))-_METADATA_SIZE) // md.type.itemsize
         return md
@@ -38,31 +38,31 @@ class Metadata:
             raise Exception('Missing index freq.')
         md = cls()
         md.type = series.dtype
-        md.periodicity = lm.get_periodicity(series.index.freq.name)
-        md.start_index = md.periodicity.get_index(series.index[0])
-        md.end_index = md.periodicity.get_index(series.index[-1]) + 1
+        md.periodicity_code = series.index.freq.name
+        md.start_index = get_index(md.periodicity_code, series.index[0])
+        md.end_index = get_index(md.periodicity_code, series.index[-1]) + 1
         return md
 
     def date_range(self):
-        return pd.date_range(self.periodicity.get_date(self.start_index),
-                self.periodicity.get_date(self.end_index-1),freq=self.periodicity.pandas_offset)
+        return pd.date_range(get_date(self.periodicity_code, self.start_index),
+                    get_date(self.periodicity_code, self.end_index-1),freq=self.periodicity_code)
 
     def dates(self):
-        return (self.periodicity.get_date(self.start_index), self.periodicity.get_date(self.end_index-1))
+        return (get_date(self.periodicity_code, self.start_index), get_date(self.periodicity_code, self.end_index-1))
 
     def pack(self):
         return struct.pack(_METADATA_FORMAT, '{0: <6}'.format(self.type.str).encode(),
-                '{0: <6}'.format(self.periodicity.get_name()).encode(), self.start_index)
+                '{0: <6}'.format(self.periodicity_code).encode(), self.start_index)
 
     def check_compat(self, other):
-        if self.periodicity.get_name() != other.periodicity.get_name():
+        if self.periodicity_code != other.periodicity_code:
             raise Exception('Incompatible periodicity.')
         if self.type.char != other.type.char:
             raise Exception('Incompatible type.')
 
 def read_series(key, date_range=None, nas_if_missing=False):
-    r = redis.Redis(connection_pool=lm.REDIS_POOL)
-    series_key = f'{lm.SERIES_PREFIX}.{key}'
+    r = redis.Redis(connection_pool=REDIS_POOL)
+    series_key = f'{SERIES_PREFIX}.{key}'
     saved_md = Metadata.read(series_key)
     if saved_md is None:
         if date_range is None or not nas_if_missing:
@@ -70,8 +70,8 @@ def read_series(key, date_range=None, nas_if_missing=False):
         return pd.Series(np.full(len(date_range),np.nan),index=date_range)
     if date_range is None:
         date_range = saved_md.date_range()
-    start_index = saved_md.periodicity.get_index(date_range[0])
-    end_index = saved_md.periodicity.get_index(date_range[-1])
+    start_index = get_index(saved_md.periodicity_code, date_range[0])
+    end_index = get_index(saved_md.periodicity_code, date_range[-1])
     if not (start_index > saved_md.end_index or end_index < saved_md.start_index):
         selected_start = max(0, start_index - saved_md.start_index)
         selected_end = min(-1, (end_index - saved_md.end_index + 1) * saved_md.type.itemsize - 1)
@@ -91,9 +91,9 @@ def read_series(key, date_range=None, nas_if_missing=False):
     return pd.Series(output, index=date_range, name=key)
 
 def write_series(key, series, tables={}):
-    series_key = f'{lm.SERIES_PREFIX}.{key}'
+    series_key = f'{SERIES_PREFIX}.{key}'
     metadata = Metadata.for_series(series)
-    r = redis.Redis(connection_pool=lm.REDIS_POOL)
+    r = redis.Redis(connection_pool=REDIS_POOL)
     saved_md = Metadata.read(series_key)
     if saved_md is None:
         r.set(series_key, metadata.pack() + series.values.tostring())
@@ -111,15 +111,5 @@ def write_series(key, series, tables={}):
             r.append(series_key, series.values.tostring())
 
 def delete_series(key):
-    r = redis.Redis(connection_pool=lm.REDIS_POOL)
-    r.delete(f'{lm.SERIES_PREFIX}.{key}')
-
-def _date_range(start, end):
-    per = lm.get_periodicity('B')
-    return pd.date_range(per.get_date(start), per.get_date(end), freq='B')
-
-def _start_end(date_range):
-    per = lm.get_periodicity('B')
-    start, end = per.get_index(date_range[0]), per.get_index(date_range[-1])
-
-
+    r = redis.Redis(connection_pool=REDIS_POOL)
+    r.delete(f'{SERIES_PREFIX}.{key}')
