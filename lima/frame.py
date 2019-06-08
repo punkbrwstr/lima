@@ -1,58 +1,53 @@
 import redis
 import pandas as pd
-from lima.time import *
-from lima.config import *
+import numpy as np
+from lima.base import *
 from lima.series import *
 
-__all__ = ['read_frame','write_frame', 'delete_frame']
+__all__ = ['read_frame','write_frame', 'delete_frame', 'read_frame_metadata']
 
 def read_frame(key, date_range=None):
     frame_key = f'{FRAME_PREFIX}.{key}'
-    r = redis.Redis(connection_pool=REDIS_POOL)
-    frame = r.hgetall(frame_key)
-    if frame is None or len(frame) == 0:
+    md = read_metadata(frame_key)
+    if md is None:
         return None
-    per = frame[b'periodicity'].decode()
     if date_range is None:
-        date_range =  pd.date_range(get_date(per, int(frame[b'start'])), get_date(per, int(frame[b'end'])), freq=per)
+        date_range =  pd.date_range(get_date(md.periodicity_code, md.start_index),
+                                        periods=md.end_index - md.start_index, freq=md.periodicity_code)
     else:
-        if per == date_range.freq.name:
-            raise Exception('Requested periodicity "{date_range.freq.name}" does not match saved data "{per}"') 
-    columns = frame[b'columns'].decode().split('\t')
-    series = frame[b'series_codes'].decode().split('\t')
-    return pd.DataFrame({ c: read_series(s, date_range, nas_if_missing=True) for c,s in zip(columns,series)})
+        if md.periodicity_code != date_range.freq.name:
+            raise Exception('Requested periodicity "{date_range.freq.name}" does not match saved data "{md.periodicity_code}"') 
+    columns = getrange(frame_key, 0, -1).decode().split('\t')
+    return pd.DataFrame({ c: read_series(f'{key}.{c}', date_range) for c in columns})
 
 def write_frame(key, frame):
-    if frame.index.freq is None:
-        raise Exception('Missing index freq.')
-    per = frame.index.freq.name
-    r = redis.Redis(connection_pool=REDIS_DECODED_POOL)
     frame_key = f'{FRAME_PREFIX}.{key}'
-    prev_frame = r.hgetall(frame_key)
-    end = get_index(per, frame.index[-1])
-    if len(prev_frame) > 0:
-        if prev_frame['periodicity'] != per:
-            raise Exception('Incompatible periodicity.')
-        #if end <= int(prev_frame['end']):
-        #    return
-        start = int(prev_frame['start'])
-        columns = prev_frame['columns'].split('\t')
-        series_codes = prev_frame['series_codes'].split('\t')
+    md = read_metadata(frame_key)
+    end = get_index(frame.index.freq.name, frame.index[-1])
+    if md is None:
+        start = get_index(frame.index.freq.name, frame.index[0])
+        md = Metadata(np.dtype('str'), frame.index.freq.name, start, end)
+        columns = set()
+        first_save = True
     else:
-        start = get_index(per, frame.index[0])
-        columns,series_codes = [], []
-    frame_dict = {'periodicity': per, 'start': str(start), 'end': str(end) }
+        if md.periodicity_code != frame.index.freq.name:
+            raise Exception('Incompatible periodicity.')
+        columns = set(getrange(frame_key, 0, -1).decode().split('\t'))
+        if end > md.end_index:
+            update_metadata_end_index(frame_key, end)
+        first_save = False
+    new_columns = []
     for column,series in frame.iteritems():
-    #    if not np.all(np.isnan(series.values)):
         series_code = f'{key}.{column}'
         if not column in columns:
-            columns.append(column)
-            series_codes.append(series_code)
+            columns.add(column)
+            new_columns.append(column)
         series = series[series.first_valid_index():series.last_valid_index()]
         write_series(series_code, series)
-    frame_dict['columns'] = '\t'.join(columns)
-    frame_dict['series_codes'] = '\t'.join(series_codes)
-    r.hmset(frame_key, frame_dict)
+    if first_save:
+        write(frame_key, md, '\t'.join(new_columns).encode()) 
+    else:
+        append(frame_key, ('\t' + '\t'.join(new_columns)).encode()) 
 
 def delete_frame(key):
     prev_frame = read_frame(key)
@@ -61,3 +56,7 @@ def delete_frame(key):
         r.delete(f'{FRAME_PREFIX}.{key}')
         for column in prev_frame.columns:
             delete_series(f'{key}.{column}')
+
+def read_frame_metadata(key, frame):
+    frame_key = f'{FRAME_PREFIX}.{key}'
+    return read_metadata(frame_key)
