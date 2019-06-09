@@ -85,7 +85,7 @@ def get_metadata_for_series(series):
     return Metadata(series.dtype, series.index.freq.name, start_index, start_index + len(series.index)) 
 
 def pack_metadata(metadata):
-    return struct.pack(METADATA_FORMAT, '{0: <6}'.format(metadata.type.str).encode(),
+    return struct.pack(METADATA_FORMAT, '{0: <6}'.format(metadata.dtype.str).encode(),
                 '{0: <6}'.format(metadata.periodicity_code).encode(), metadata.start_index, metadata.end_index)
 
 def metadata_to_date_range(metadata):

@@ -57,6 +57,6 @@ def delete_frame(key):
         for column in prev_frame.columns:
             delete_series(f'{key}.{column}')
 
-def read_frame_metadata(key, frame):
+def read_frame_metadata(key):
     frame_key = f'{FRAME_PREFIX}.{key}'
     return read_metadata(frame_key)
