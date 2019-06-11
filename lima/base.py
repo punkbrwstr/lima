@@ -24,7 +24,7 @@ _ENV_VARS = {
 
 _ARGS = {name:os.environ.get(var, None) for name, var in _ENV_VARS.items() if os.environ.get(var, None)}
 
-_ARGS['db'] = 1
+#_ARGS['db'] = 1
 
 if 'path' in _ARGS:
     _ARGS.pop('host', None)
