@@ -7,6 +7,7 @@ import datetime
 import pandas as pd
 import numpy as np
 from collections import namedtuple
+from dateutil.relativedelta import relativedelta
 from redis.connection import UnixDomainSocketConnection
 
 
@@ -33,21 +34,45 @@ if 'path' in _ARGS:
 else:
     REDIS_POOL = redis.ConnectionPool(**_ARGS)
 
-def _round_w_fri(date):
+def round_bday(date):
+    return date - datetime.timedelta(days=max(0, date.weekday() - 4))
+
+def round_w_fri(date):
     date = pd.to_datetime(date).date()
     return date - datetime.timedelta(days=date.weekday()) + datetime.timedelta(days=4)
 
-Periodicity = namedtuple('Periodicity',['pandas_offset','epoque','offset_function'])
+def round_bq_dec(d):
+    remainder = d.month % 3
+    plusmonths = 0 if remainder == 0 else 2 // remainder
+    d = d +  relativedelta(months=plusmonths)
+    return d
+
+Periodicity = namedtuple('Periodicity',['pandas_offset','epoque','round_function','offset_function'])
 
 PERIODICITIES = {
-    'B' : Periodicity(pd.tseries.offsets.BDay(), datetime.date(1970,1,1), lambda epoque, date: np.busday_count(epoque,pd.to_datetime(date).date())),
-    'W-FRI' : Periodicity(pd.tseries.offsets.Week(weekday=4), datetime.date(1970,1,2), lambda epoque, date: (_round_w_fri(date) - epoque).days / 7)
+    'B' : Periodicity(pd.tseries.offsets.BDay(),
+            datetime.date(1970,1,1),
+            lambda d: d,
+            lambda epoque, date: np.busday_count(epoque,pd.to_datetime(date).date())),
+    'W-FRI' : Periodicity(pd.tseries.offsets.Week(weekday=4),
+            datetime.date(1970,1,2),
+            round_w_fri,
+            lambda epoque, date: (date - epoque).days / 7),
+    'BM' : Periodicity(pd.tseries.offsets.BusinessMonthEnd(),
+            datetime.date(1970,1,30),
+            lambda d: d,
+            lambda d2, d1: (d1.year - d2.year) * 12 + d1.month - d2.month),
+    'BQ-DEC' : Periodicity(pd.tseries.offsets.BQuarterEnd(startingMonth=3),
+            datetime.date(1970,3,31),
+            round_bq_dec,
+            lambda d2, d1: ((d1.year - d2.year) * 12 + d1.month - d2.month) // 3)
+
 }
 
 
 def get_index(periodicity_code, date):
     p = PERIODICITIES[periodicity_code]
-    return p.offset_function(p.epoque, date)
+    return p.offset_function(p.epoque, p.round_function(date))
 
 def get_date(periodicity_code, index):
     p = PERIODICITIES[periodicity_code]

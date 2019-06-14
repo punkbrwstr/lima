@@ -42,9 +42,7 @@ def write_frame(key, frame):
         if not column in columns:
             columns.add(column)
             new_columns.append(column)
-        print(series)
         series = series[series.first_valid_index():series.last_valid_index()]
-        print(series)
         write_series(series_code, series)
     if first_save:
         write(frame_key, md, '\t'.join(new_columns).encode()) 
