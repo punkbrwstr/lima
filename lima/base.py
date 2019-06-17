@@ -87,8 +87,8 @@ class Metadata:
     def __init__(self, dtype, periodicity_code, start_index, end_index):
         self.dtype = dtype
         self.periodicity_code = periodicity_code
-        self.start_index = start_index
-        self.end_index = end_index
+        self.start_index = int(start_index)
+        self.end_index = int(end_index)
 
     def start_date(self):
         return get_date(self.periodicity_code, self.start_index)
