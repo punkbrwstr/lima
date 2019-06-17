@@ -6,18 +6,24 @@ __all__ = ['read_series','write_series', 'delete_series', 'read_series_metadata'
 
 _PAD_VALUE = {'d': np.nan, '?': False}
 
-def read_series(key, date_range=None):
+def read_series(key, date_range=None, resample_method='last'):
     series_key = f'{SERIES_PREFIX}.{key}'
     saved_md = read_metadata(series_key)
     if saved_md is None:
         raise Exception(f'No series data for key: "{key}".')
+    needs_resample = False
     if date_range is None:
-        date_range = metadata_to_date_range(saved_md)
+        saved_date_range = metadata_to_date_range(saved_md)
         start_index = saved_md.start_index
         end_index = saved_md.end_index
     else:
-        start_index = get_index(saved_md.periodicity_code, date_range[0])
-        end_index = get_index(saved_md.periodicity_code, date_range[-1])
+        if saved_md.periodicity_code == date_range.freq.name:
+            saved_date_range = date_range
+        else:
+            needs_resample = True
+            saved_date_range = pd.date_range(date_range[0], date_range[-1], freq=saved_md.periodicity_code)
+        start_index = get_index(saved_md.periodicity_code, saved_date_range[0])
+        end_index = get_index(saved_md.periodicity_code, saved_date_range[-1])
     if not (start_index > saved_md.end_index or end_index < saved_md.start_index):
         selected_start = max(0, start_index - saved_md.start_index)
         selected_end = min(-1, (end_index - saved_md.end_index + 1) * saved_md.dtype.itemsize - 1)
@@ -26,13 +32,16 @@ def read_series(key, date_range=None):
         output_start = max(0, saved_md.start_index - start_index)
     else:
         data = None
-    if len(data) == len(date_range):
+    if len(data) == len(saved_date_range):
         output = data
     else:
-        output = np.full(len(date_range),_PAD_VALUE[saved_md.dtype.char])
+        output = np.full(len(saved_date_range),_PAD_VALUE[saved_md.dtype.char])
         if not data is None:
             output[output_start:output_start+len(data)] = data
-    return pd.Series(output, index=date_range, name=key)
+    s = pd.Series(output, index=saved_date_range, name=key)
+    if needs_resample:
+        return getattr(s.ffill().resample(date_range.freq.name),resample_method)()       
+    return s
 
 def write_series(key, series):
     series_key = f'{SERIES_PREFIX}.{key}'
