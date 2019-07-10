@@ -4,7 +4,15 @@ import numpy as np
 from lima.base import *
 from lima.series import *
 
-__all__ = ['read_frame','write_frame', 'delete_frame', 'read_frame_metadata']
+__all__ = ['read_frame','write_frame', 'delete_frame', 'read_frame_metadata',
+        'read_frame_headers','read_frame_series_keys']
+
+def read_frame_headers(key):
+    frame_key = f'{FRAME_PREFIX}.{key}'
+    return getrange(frame_key, 0, -1).decode().split('\t')
+
+def read_frame_series_keys(key):
+    return [f'{key}.{c}' for c in read_frame_headers(key)]
 
 def read_frame(key, date_range=None):
     frame_key = f'{FRAME_PREFIX}.{key}'
@@ -17,7 +25,7 @@ def read_frame(key, date_range=None):
     else:
         if md.periodicity_code != date_range.freq.name:
             raise Exception('Requested periodicity "{date_range.freq.name}" does not match saved data "{md.periodicity_code}"') 
-    columns = getrange(frame_key, 0, -1).decode().split('\t')
+    columns = read_frame_headers(key)
     return pd.DataFrame({ c: read_series(f'{key}.{c}', date_range) for c in columns})
 
 def write_frame(key, frame):

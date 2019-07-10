@@ -32,7 +32,7 @@ def read_series(key, date_range=None, resample_method='last'):
         output_start = max(0, saved_md.start_index - start_index)
     else:
         data = None
-    if len(data) == len(saved_date_range):
+    if not data is None and len(data) == len(saved_date_range):
         output = data
     else:
         output = np.full(len(saved_date_range),_PAD_VALUE[saved_md.dtype.char])
@@ -40,7 +40,9 @@ def read_series(key, date_range=None, resample_method='last'):
             output[output_start:output_start+len(data)] = data
     s = pd.Series(output, index=saved_date_range, name=key)
     if needs_resample:
-        return getattr(s.ffill().resample(date_range.freq.name),resample_method)()       
+        s = getattr(s.ffill().resample(date_range.freq.name),resample_method)()       
+        if len(s) != len(date_range):
+            s = s.reindex(date_range)
     return s
 
 def write_series(key, series):

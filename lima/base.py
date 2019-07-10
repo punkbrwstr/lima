@@ -118,7 +118,7 @@ def metadata_to_date_range(metadata):
                 periods=metadata.end_index - metadata.start_index, freq=metadata.periodicity_code)
 
 def update_metadata_end_index(key, end_index):
-    redis.Redis(connection_pool=REDIS_POOL).setrange(key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',end_index))
+    redis.Redis(connection_pool=REDIS_POOL).setrange(key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(end_index)))
 
 def write(key, metadata, data):
     redis.Redis(connection_pool=REDIS_POOL).set(key, pack_metadata(metadata) + data)
@@ -143,7 +143,18 @@ def hget(key, item):
 
 def hmget(key, items):
     return redis.Redis(connection_pool=REDIS_POOL).hmget(key, items)
-
 def hgetall(key):
     return redis.Redis(connection_pool=REDIS_POOL).hgetall(key)
 
+
+_LUA_ARCHIVE = """
+    local new_key = string.gsub(KEYS[1],'^l.','l.a.') .. '.' .. redis.call('TIME')[1]
+    redis.call("RESTORE", new_key, 0, redis.call("DUMP", KEYS[1]))
+    return "OK"
+""".strip()
+
+_LUA_ARCHIVE_HASH = hashlib.sha1(REDIS_POOL.get_encoder().encode(_LUA_ARCHIVE)).hexdigest()
+
+def archive(key):
+    #return redis.Redis(connection_pool=REDIS_POOL).eval(_LUA_ARCHIVE, 1, key)
+    return redis.Redis(connection_pool=REDIS_POOL).evalsha(_LUA_ARCHIVE_HASH, 1, key)
