@@ -18,8 +18,8 @@ def read_series(key, start=None, end=None, periodicity=None,
     if start <= md.end and end >= md.start:
         itemsize = np.dtype(md.dtype).itemsize 
         selected_start = max(0, start - md.start)
-        selected_end = min(-1, (end - md.end + 1) * itemsize - 1)
-        buff = get_data_range(series_key, selected_start * itemsize, selected_end)
+        selected_end = min(end, md.end) - md.start + 1
+        buff = get_data_range(series_key, selected_start * itemsize, selected_end * itemsize)
         data = np.frombuffer(buff, md.dtype)
         if len(data) != end - start + 1:
             output_start = max(0, md.start - start)

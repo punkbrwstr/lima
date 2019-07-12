@@ -81,6 +81,7 @@ def delete(key):
     get_redis().delete(key)
 
 def get_data_range(key, start, end):
+    end = -1 if end == -1 else METADATA_SIZE + end - 1
     return get_redis().getrange(key, str(METADATA_SIZE + start), str(end))
     
 def set_data_range(key, start, data):
@@ -96,7 +97,7 @@ def hash_get(key, item=None):
     if item is None:
         return get_redis().hgetall(key)
     if isinstance(item, list) or isinstance(item, tuple):
-        return get_redis().hmget(key, items)
+        return get_redis().hmget(key, item)
     return get_redis().hget(key, item)
 
 _LUA_ARCHIVE = """

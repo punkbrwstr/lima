@@ -1,14 +1,12 @@
 from lima.base import *
 
-__all__ = ['read_hash','read_hash_item','read_hash_items','write_hash','write_hash_item','delete_hash']
+__all__ = ['read_hash','read_hash_item','write_hash','write_hash_item','delete_hash']
 
 
 def read_hash_item(key, item):
-    value = hget(f'{HASH_PREFIX}.{key}', item) 
-    return value.decode() if not value is None else None
-
-def read_hash_items(key, items):
-    values = hmget(f'{HASH_PREFIX}.{key}', items) 
+    values = hash_get(f'{HASH_PREFIX}.{key}', item) 
+    if not isinstance(item,list):
+        values = [values]
     return [v.decode() if not v is None else None for v in values ]
 
 def read_hash(key):

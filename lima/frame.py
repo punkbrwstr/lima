@@ -24,6 +24,7 @@ def read_frame(key, start=None, end=None, periodicity=None,
     end = md.end if end is None else get_index(md.periodicity, end)
     periodicity = md.periodicity if periodicity is None else periodicity
     columns = read_frame_headers(key)
+    print(columns)
     data = np.column_stack([read_series(f'{key}.{c}', start, end, periodicity,
                 resample_method, as_series=False)[3] for c in columns])
     if not as_frame:
