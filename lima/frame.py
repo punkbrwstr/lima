@@ -9,24 +9,27 @@ __all__ = ['read_frame','write_frame', 'delete_frame', 'read_frame_metadata',
 
 def read_frame_headers(key):
     frame_key = f'{FRAME_PREFIX}.{key}'
-    return getrange(frame_key, 0, -1).decode().split('\t')
+    return get_data_range(frame_key, 0, -1).decode().split('\t')
 
 def read_frame_series_keys(key):
     return [f'{key}.{c}' for c in read_frame_headers(key)]
 
-def read_frame(key, date_range=None):
+def read_frame(key, start=None, end=None, periodicity=None,
+                        resample_method='last', as_frame=True):
     frame_key = f'{FRAME_PREFIX}.{key}'
     md = read_metadata(frame_key)
     if md is None:
-        return None
-    if date_range is None:
-        date_range =  pd.date_range(get_date(md.periodicity_code, md.start_index),
-                                        periods=md.end_index - md.start_index + 1, freq=md.periodicity_code)
-    else:
-        if md.periodicity_code != date_range.freq.name:
-            raise Exception('Requested periodicity "{date_range.freq.name}" does not match saved data "{md.periodicity_code}"') 
+        raise KeyError(f'No frame data for key: "{key}".')
+    start = md.start if start is None else get_index(md.periodicity, start)
+    end = md.end if end is None else get_index(md.periodicity, end)
+    periodicity = md.periodicity if periodicity is None else periodicity
     columns = read_frame_headers(key)
-    return pd.DataFrame({ c: read_series(f'{key}.{c}', date_range) for c in columns})
+    data = np.column_stack([read_series(f'{key}.{c}', start, end, periodicity,
+                resample_method, as_series=False)[3] for c in columns])
+    if not as_frame:
+        return data
+    return pd.DataFrame(data, columns=columns,
+                index=get_date_range(periodicity, start, end))
 
 def write_frame(key, frame):
     frame_key = f'{FRAME_PREFIX}.{key}'
@@ -34,15 +37,15 @@ def write_frame(key, frame):
     end = get_index(frame.index.freq.name, frame.index[-1])
     if md is None:
         start = get_index(frame.index.freq.name, frame.index[0])
-        md = Metadata(np.dtype('str'), frame.index.freq.name, start, end)
+        md = Metadata('<U', frame.index.freq.name, start, end)
         columns = set()
         first_save = True
     else:
-        if md.periodicity_code != frame.index.freq.name:
+        if md.periodicity != frame.index.freq.name:
             raise Exception('Incompatible periodicity.')
-        columns = set(getrange(frame_key, 0, -1).decode().split('\t'))
-        if end > md.end_index:
-            update_metadata_end_index(frame_key, end)
+        columns = set(get_data_range(frame_key, 0, -1).decode().split('\t'))
+        if end > md.end:
+            update_end(frame_key, end)
         first_save = False
     new_columns = []
     for column,series in frame.iteritems():
@@ -58,12 +61,12 @@ def write_frame(key, frame):
         append(frame_key, ('\t' + '\t'.join(new_columns)).encode()) 
 
 def delete_frame(key):
-    prev_frame = read_frame(key)
-    if not prev_frame is None:
-        r = redis.Redis(connection_pool=REDIS_POOL)
-        r.delete(f'{FRAME_PREFIX}.{key}')
-        for column in prev_frame.columns:
-            delete_series(f'{key}.{column}')
+    for series in read_frame_series_keys(key):
+        delete_series(series)
+    delete(f'{FRAME_PREFIX}.{key}')
+
+
+
 
 def read_frame_metadata(key):
     frame_key = f'{FRAME_PREFIX}.{key}'

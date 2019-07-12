@@ -3,13 +3,12 @@ import struct
 import os
 import base64
 import hashlib
+import calendar
 import datetime
-import pandas as pd
 import numpy as np
 from collections import namedtuple
-from dateutil.relativedelta import relativedelta
 from redis.connection import UnixDomainSocketConnection
-
+from lima.time import *
 
 SERIES_PREFIX = 'l.s'
 FRAME_PREFIX = 'l.f'
@@ -34,118 +33,71 @@ if 'path' in _ARGS:
 else:
     REDIS_POOL = redis.ConnectionPool(**_ARGS)
 
-def round_bday(date):
-    return date - datetime.timedelta(days=max(0, date.weekday() - 4))
+Type = namedtuple('Type', ['code', 'pad_value', 'length'])
 
-def round_w_fri(date):
-    date = pd.to_datetime(date).date()
-    return date - datetime.timedelta(days=date.weekday()) + datetime.timedelta(days=4)
-
-def round_bq_dec(d):
-    remainder = d.month % 3
-    plusmonths = 0 if remainder == 0 else 2 // remainder
-    d = d +  relativedelta(months=plusmonths)
-    return d
-
-Periodicity = namedtuple('Periodicity',['pandas_offset','epoque','round_function','offset_function'])
-
-PERIODICITIES = {
-    'B' : Periodicity(pd.tseries.offsets.BDay(),
-            datetime.date(1970,1,1),
-            lambda d: d,
-            lambda epoque, date: np.busday_count(epoque,pd.to_datetime(date).date())),
-    'W-FRI' : Periodicity(pd.tseries.offsets.Week(weekday=4),
-            datetime.date(1970,1,2),
-            round_w_fri,
-            lambda epoque, date: (date - epoque).days / 7),
-    'BM' : Periodicity(pd.tseries.offsets.BusinessMonthEnd(),
-            datetime.date(1970,1,30),
-            lambda d: d,
-            lambda d2, d1: (d1.year - d2.year) * 12 + d1.month - d2.month),
-    'BQ-DEC' : Periodicity(pd.tseries.offsets.BQuarterEnd(startingMonth=3),
-            datetime.date(1970,3,31),
-            round_bq_dec,
-            lambda d2, d1: ((d1.year - d2.year) * 12 + d1.month - d2.month) // 3)
-
+TYPES = {
+    '<f8': Type('<f8',np.nan,8),
+    '|b1': Type('|b1',False,1),
+    '<i8': Type('<i8',0,8)
 }
-
-
-def get_index(periodicity_code, date):
-    p = PERIODICITIES[periodicity_code]
-    return p.offset_function(p.epoque, p.round_function(date))
-
-def get_date(periodicity_code, index):
-    p = PERIODICITIES[periodicity_code]
-    return (p.epoque + p.pandas_offset * index).date()
 
 METADATA_FORMAT = '<6s6sll'
 METADATA_SIZE = struct.calcsize(METADATA_FORMAT)
 
-class Metadata:
-    __slots__ = ['dtype','periodicity_code','start_index','end_index']
+Metadata = namedtuple('Metadata', ['dtype','periodicity','start','end'])
 
-    def __init__(self, dtype, periodicity_code, start_index, end_index):
-        self.dtype = dtype
-        self.periodicity_code = periodicity_code
-        self.start_index = int(start_index)
-        self.end_index = int(end_index)
-
-    def start_date(self):
-        return get_date(self.periodicity_code, self.start_index)
-
-    def end_date(self):
-        return get_date(self.periodicity_code, self.end_index)
+def get_redis():
+    return redis.Redis(connection_pool=REDIS_POOL)
 
 def read_metadata(key):
-    data = redis.Redis(connection_pool=REDIS_POOL).getrange(key,0,METADATA_SIZE-1)
+    data = get_redis().getrange(key,0,METADATA_SIZE-1)
     if len(data) == 0:
         return None
     s = struct.unpack(METADATA_FORMAT, data)
-    return Metadata(np.dtype(s[0].decode().strip()), s[1].decode().strip(), s[2], s[3])
+    return Metadata(s[0].decode().strip(), s[1].decode().strip(), s[2], s[3])
 
 def get_metadata_for_series(series):
     if series.index.freq is None:
         raise Exception('Missing index freq.')
-    start_index = get_index(series.index.freq.name, series.index[0])
-    return Metadata(series.dtype, series.index.freq.name, start_index, start_index + len(series.index)) 
+    start = get_index(series.index.freq.name, series.index[0])
+    return Metadata(series.dtype.str, series.index.freq.name,
+                            start, start + len(series.index)-1) 
 
-def pack_metadata(metadata):
-    return struct.pack(METADATA_FORMAT, '{0: <6}'.format(metadata.dtype.str).encode(),
-                '{0: <6}'.format(metadata.periodicity_code).encode(), metadata.start_index, metadata.end_index)
-
-def metadata_to_date_range(metadata):
-    return pd.date_range(get_date(metadata.periodicity_code, metadata.start_index),
-                periods=metadata.end_index - metadata.start_index, freq=metadata.periodicity_code)
-
-def update_metadata_end_index(key, end_index):
-    redis.Redis(connection_pool=REDIS_POOL).setrange(key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(end_index)))
+def update_end(key, end):
+    get_redis().setrange(key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(end)))
 
 def write(key, metadata, data):
-    redis.Redis(connection_pool=REDIS_POOL).set(key, pack_metadata(metadata) + data)
+    packed_md = struct.pack(METADATA_FORMAT,
+                            '{0: <6}'.format(metadata.dtype).encode(),
+                            '{0: <6}'.format(metadata.periodicity).encode(),
+                            metadata.start,
+                            metadata.end) 
+    get_redis().set(key, packed_md + data)
     
 def append(key, data):
-    redis.Redis(connection_pool=REDIS_POOL).append(key, data)
+    get_redis().append(key, data)
 
 def delete(key):
-    redis.Redis(connection_pool=REDIS_POOL).delete(key)
+    get_redis().delete(key)
 
-def getrange(key, start, end):
-    return redis.Redis(connection_pool=REDIS_POOL).getrange(key, str(METADATA_SIZE + start), str(end))
+def get_data_range(key, start, end):
+    return get_redis().getrange(key, str(METADATA_SIZE + start), str(end))
     
-def hset(key, item, value):
-    redis.Redis(connection_pool=REDIS_POOL).hset(key, item, value)
+def set_data_range(key, start, data):
+    get_redis().setrange(key, str(METADATA_SIZE + start), data)
+    
+def hash_set(key, item, value=None):
+    if value is None:
+        get_redis().hmset(key, item)
+    else:
+        get_redis().hset(key, item, value)
 
-def hmset(key, item_value_dict):
-    redis.Redis(connection_pool=REDIS_POOL).hmset(key, item_value_dict)
-
-def hget(key, item):
-    return redis.Redis(connection_pool=REDIS_POOL).hget(key, item)
-
-def hmget(key, items):
-    return redis.Redis(connection_pool=REDIS_POOL).hmget(key, items)
-def hgetall(key):
-    return redis.Redis(connection_pool=REDIS_POOL).hgetall(key)
-
+def hash_get(key, item=None):
+    if item is None:
+        return get_redis().hgetall(key)
+    if isinstance(item, list) or isinstance(item, tuple):
+        return get_redis().hmget(key, items)
+    return get_redis().hget(key, item)
 
 _LUA_ARCHIVE = """
     local new_key = string.gsub(KEYS[1],'^l.','l.a.') .. '.' .. redis.call('TIME')[1]

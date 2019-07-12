@@ -1,69 +1,63 @@
 from lima.base import *
+from lima.time import *
 import pandas as pd
 import numpy as np
 
 __all__ = ['read_series','write_series', 'delete_series', 'read_series_metadata']
 
-_PAD_VALUE = {'d': np.nan, '?': False}
 
-def read_series(key, date_range=None, resample_method='last'):
+def read_series(key, start=None, end=None, periodicity=None,
+                        resample_method='last', as_series=True):
     series_key = f'{SERIES_PREFIX}.{key}'
-    saved_md = read_metadata(series_key)
-    if saved_md is None:
-        raise Exception(f'No series data for key: "{key}".')
-    needs_resample = False
-    if date_range is None:
-        saved_date_range = metadata_to_date_range(saved_md)
-        start_index = saved_md.start_index
-        end_index = saved_md.end_index
-    else:
-        if saved_md.periodicity_code == date_range.freq.name:
-            saved_date_range = date_range
-        else:
-            needs_resample = True
-            saved_date_range = pd.date_range(date_range[0], date_range[-1], freq=saved_md.periodicity_code)
-        start_index = get_index(saved_md.periodicity_code, saved_date_range[0])
-        end_index = get_index(saved_md.periodicity_code, saved_date_range[-1])
-    if not (start_index > saved_md.end_index or end_index < saved_md.start_index):
-        selected_start = max(0, start_index - saved_md.start_index)
-        selected_end = min(-1, (end_index - saved_md.end_index + 1) * saved_md.dtype.itemsize - 1)
-        buff = getrange(series_key, selected_start * saved_md.dtype.itemsize, selected_end)
-        data = np.frombuffer(buff, saved_md.dtype)
-        output_start = max(0, saved_md.start_index - start_index)
-    else:
-        data = None
-    if not data is None and len(data) == len(saved_date_range):
-        output = data
-    else:
-        output = np.full(len(saved_date_range),_PAD_VALUE[saved_md.dtype.char])
-        if not data is None:
+    md = read_metadata(series_key)
+    if md is None:
+        raise KeyError(f'No series data for key: "{key}".')
+    start = md.start if start is None else get_index(md.periodicity, start)
+    end = md.end if end is None else get_index(md.periodicity, end)
+    needs_resample = not (periodicity is None or periodicity == md.periodicity)
+    if start <= md.end and end >= md.start:
+        itemsize = np.dtype(md.dtype).itemsize 
+        selected_start = max(0, start - md.start)
+        selected_end = min(-1, (end - md.end + 1) * itemsize - 1)
+        buff = get_data_range(series_key, selected_start * itemsize, selected_end)
+        data = np.frombuffer(buff, md.dtype)
+        if len(data) != end - start + 1:
+            output_start = max(0, md.start - start)
+            output = np.full(end - start + 1,TYPES[md.dtype].pad_value)
             output[output_start:output_start+len(data)] = data
-    s = pd.Series(output, index=saved_date_range, name=key)
+        else:
+            output = data
+    else:
+        output = np.full(end - start + 1,TYPES[md.dtype].pad_value)
+    if not (as_series or needs_resample):
+        return (start, end, md.periodicity, output)
+    s = pd.Series(output, index=get_date_range(md.periodicity,start,end), name=key)
     if needs_resample:
-        s = getattr(s.ffill().resample(date_range.freq.name),resample_method)()       
-        if len(s) != len(date_range):
-            s = s.reindex(date_range)
+        s = getattr(s.ffill().resample(periodicity),resample_method)()       
+        #if len(s) != len(date_range):
+            #s = s.reindex(date_range)
     return s
 
 def write_series(key, series):
     series_key = f'{SERIES_PREFIX}.{key}'
-    metadata = get_metadata_for_series(series)
+    series_md = get_metadata_for_series(series)
     saved_md = read_metadata(series_key)
-    if saved_md is None:
-        write(series_key, metadata, series.values.tostring())
+    if saved_md and saved_md.periodicity != series_md.periodicity:
+        raise Exception(f'Incompatible periodicity.')   
+    data = series.values
+    if saved_md is None or series_md.start < saved_md.start:
+        write(series_key, series_md, data.tostring())
+        return
+    if series_md.start > saved_md.end:
+        pad = np.full(metadata.start - saved_md.end, TYPES[saved_md.dtype].pad_value)
+        data = np.hstack([pad, np.full])
+        start = saved_md.end + 1
     else:
-        if saved_md.periodicity_code != metadata.periodicity_code:
-            raise Exception(f'Incompatible periodicity.')   
-        if metadata.end_index < saved_md.end_index:
-            return
-        elif metadata.start_index < saved_md.end_index:
-            append(series_key, series.values[saved_md.end_index - metadata.start_index:].tostring())
-        else:
-            if metadata.start_index > saved_md.end_index:
-                append(series_key, np.full(metadata.start_index - saved_md.end_index, _PAD_VALUE[saved_md.dtype.char]).tostring())
-            append(series_key, series.values.tostring())
-        if metadata.end_index > saved_md.end_index:
-            update_metadata_end_index(series_key, metadata.end_index)
+        start = series_md.start
+    start_offset = (start - saved_md.start) * np.dtype(saved_md.dtype).itemsize
+    set_data_range(series_key, start_offset, data.tostring())
+    if series_md.end > saved_md.end:
+        update_end(series_key, series_md.end)
 
 def delete_series(key):
     delete(f'{SERIES_PREFIX}.{key}')
