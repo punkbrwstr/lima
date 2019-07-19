@@ -4,7 +4,16 @@ from collections import namedtuple
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 
+def parse_date(date):
+    if isinstance(date, datetime.date):
+        return date       
+    if isinstance(date, str):
+        return datetime.datetime.strptime(date, "%Y-%m-%d").date()
+    if isinstance(date, datetime.datetime):
+        return date.date()
+
 def round_b(date):
+    date = parse_date(date)
     weekday = date.weekday()
     if weekday < 5:
         return date
@@ -12,28 +21,33 @@ def round_b(date):
         return date + datetime.timedelta(days=7 - weekday)
 
 def round_w_fri(date):
+    date = parse_date(date)
     weekday = date.weekday()
     if weekday == 4:
         return date
     else:
-        return date - datetime.timedelta(days=4 - weekday)
+        return date + datetime.timedelta(days=4 - weekday)
 
 def round_bm(date):
+    date = parse_date(date)
     next_month = date.replace(day=28) + datetime.timedelta(days=4) 
-    return next_month - datetime.timedelta(days=next_month.day)
+    last_day = next_month - datetime.timedelta(days=next_month.day)
+    return last_day - datetime.timedelta(days=max(0,last_day.weekday() - 4))
 
-def round_bq_dec(d):
-    remainder = d.month % 3
+def round_bq_dec(date):
+    date = parse_date(date)
+    remainder = date.month % 3
     plusmonths = 0 if remainder == 0 else 2 // remainder
-    d = d +  relativedelta(months=plusmonths)
-    return d
+    date = date +  relativedelta(months=plusmonths)
+    return round_bm(date)
 
 def add_bm(date, months):
     month = date.month - 1 + months
     year = date.year + month // 12
     month = month % 12 + 1
     day = min(date.day, calendar.monthrange(year,month)[1])
-    return datetime.date(year, month, day)
+    day = datetime.date(year, month, day)
+    return round_bm(day)
 
 def add_b(date, b):
     daysSinceMonday = date.weekday()
@@ -62,34 +76,33 @@ PERIODICITIES = {
     'W-FRI' : Periodicity(
             datetime.date(1970,1,2),
             round_w_fri,
-            lambda d1, d2: (d2 - d1).days / 7,
+            lambda d1, d2: (d2 - d1).days // 7,
             lambda d, i: d + datetime.timedelta(days=i * 7)),
     'BM' : Periodicity(
             datetime.date(1970,1,30),
             round_bm,
             lambda d2, d1: (d1.year - d2.year) * 12 + d1.month - d2.month,
-            lambda d, i: add_months(d,i)),
+            lambda d, i: add_bm(d,i)),
     'BQ-DEC' : Periodicity(
             datetime.date(1970,3,31),
             round_bq_dec,
             lambda d2, d1: ((d1.year - d2.year) * 12 + d1.month - d2.month) // 3,
-            lambda d, i: add_months(round_bq_dec(d),i * 3))
+            lambda d, i: add_bm(d, i * 3))
 }
 
 
 def get_index(periodicity, date):
     if isinstance(date, int):
         return date
-    if isinstance(date, str):
-        date = datetime.datetime.strptime(date, "%Y-%m-%d").date()
-    if isinstance(date, datetime.datetime):
-        date = date.date()
     p = PERIODICITIES[periodicity]
     return p.count_function(p.epoque, p.round_function(date))
 
 def get_date(periodicity, index):
     p = PERIODICITIES[periodicity]
     return p.offset_function(p.epoque, index)
+
+def offset(periodicity, date, offset):
+    return get_date(periodicity, get_index(periodicity, date) + offset)
 
 def get_date_range(periodicity, start, end):
     return pd.date_range(get_date(periodicity,start),

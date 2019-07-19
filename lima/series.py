@@ -12,30 +12,41 @@ def read_series(key, start=None, end=None, periodicity=None,
     md = read_metadata(series_key)
     if md is None:
         raise KeyError(f'No series data for key: "{key}".')
-    start = md.start if start is None else get_index(md.periodicity, start)
-    end = md.end if end is None else get_index(md.periodicity, end)
     needs_resample = not (periodicity is None or periodicity == md.periodicity)
-    if start <= md.end and end >= md.start:
+    if needs_resample:
+        if not start is None:
+            start_index = get_index(md.periodicity,get_date(periodicity,get_index(periodicity,start)))
+        else:
+            start_index = md.start
+        if not end is None:
+            end_index = get_index(md.periodicity,get_date(periodicity,get_index(periodicity,end)))
+        else:
+            end_index = md.end
+    else:
+        start_index = md.start if start is None else get_index(md.periodicity, start)
+        end_index = md.end if end is None else get_index(md.periodicity, end)
+    periodicity = periodicity if periodicity else md.periodicity
+    if start_index <= md.end and end_index >= md.start:
         itemsize = np.dtype(md.dtype).itemsize 
-        selected_start = max(0, start - md.start)
-        selected_end = min(end, md.end) - md.start + 1
+        selected_start = max(0, start_index - md.start)
+        selected_end = min(end_index, md.end) - md.start + 1
         buff = get_data_range(series_key, selected_start * itemsize, selected_end * itemsize)
         data = np.frombuffer(buff, md.dtype)
-        if len(data) != end - start + 1:
-            output_start = max(0, md.start - start)
-            output = np.full(end - start + 1,TYPES[md.dtype].pad_value)
+        if len(data) != end_index - start_index + 1:
+            output_start = max(0, md.start - start_index)
+            output = np.full(end_index - start_index + 1,TYPES[md.dtype].pad_value)
             output[output_start:output_start+len(data)] = data
         else:
             output = data
     else:
-        output = np.full(end - start + 1,TYPES[md.dtype].pad_value)
+        output = np.full(end_index - start_index + 1,TYPES[md.dtype].pad_value)
     if not (as_series or needs_resample):
-        return (start, end, md.periodicity, output)
-    s = pd.Series(output, index=get_date_range(md.periodicity,start,end), name=key)
+        return (start_index, end_index, md.periodicity, output)
+    s = pd.Series(output, index=get_date_range(md.periodicity,start_index,end_index), name=key)
     if needs_resample:
-        s = getattr(s.ffill().resample(periodicity),resample_method)()       
-        #if len(s) != len(date_range):
-            #s = s.reindex(date_range)
+        s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(pd.date_range(start,end, freq=periodicity))       
+        if not as_series:
+            return (get_index(periodicity,s.index[0]), get_index(periodicity,s.index[-1]), periodicity, s.values)
     return s
 
 def write_series(key, series):
@@ -49,7 +60,7 @@ def write_series(key, series):
         write(series_key, series_md, data.tostring())
         return
     if series_md.start > saved_md.end:
-        pad = np.full(metadata.start - saved_md.end, TYPES[saved_md.dtype].pad_value)
+        pad = np.full(series_md.start - saved_md.end, TYPES[saved_md.dtype].pad_value)
         data = np.hstack([pad, np.full])
         start = saved_md.end + 1
     else:
