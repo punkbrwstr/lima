@@ -4,8 +4,7 @@ import numpy as np
 from lima.base import *
 from lima.series import *
 
-__all__ = ['read_frame','write_frame', 'delete_frame', 'read_frame_metadata',
-        'read_frame_headers','read_frame_series_keys']
+__all__ = ['read_frame','write_frame', 'delete_frame', 'read_frame_metadata', 'read_frame_headers','read_frame_series_keys', 'truncate_frame', 'list_frames']
 
 def read_frame_headers(key):
     frame_key = f'{FRAME_PREFIX}.{key}'
@@ -34,9 +33,9 @@ def read_frame(key, start=None, end=None, periodicity=None,
 def write_frame(key, frame):
     frame_key = f'{FRAME_PREFIX}.{key}'
     md = read_metadata(frame_key)
-    end = get_index(frame.index.freq.name, frame.index[-1])
+    end = get_index(frame.index.freq.name, frame.index[-1].date())
     if md is None:
-        start = get_index(frame.index.freq.name, frame.index[0])
+        start = get_index(frame.index.freq.name, frame.index[0].date())
         md = Metadata('<U', frame.index.freq.name, start, end)
         columns = set()
         first_save = True
@@ -65,9 +64,16 @@ def delete_frame(key):
         delete_series(series)
     delete(f'{FRAME_PREFIX}.{key}')
 
-
-
-
 def read_frame_metadata(key):
     frame_key = f'{FRAME_PREFIX}.{key}'
     return read_metadata(frame_key)
+
+def truncate_frame(key, end_date):
+    frame_key = f'{FRAME_PREFIX}.{key}'
+    md = read_metadata(frame_key)
+    end_index = get_index(md.periodicity, end_date)
+    if end_index < md.end:
+        update_end(frame_key, end_index)
+
+def list_frames(match='*'):
+    return [key.decode().replace(FRAME_PREFIX + '.','') for key in list_keys(f'{FRAME_PREFIX}.{match}')]

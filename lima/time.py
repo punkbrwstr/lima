@@ -4,13 +4,29 @@ from collections import namedtuple
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 
+_Range = namedtuple('_Range',['start', 'end', 'periodicity'])
+
+
+def get_range(start, end, periodicity):
+    return _Range(get_index(periodicity, start),
+                    get_index(periodicity, end), periodicity)
+
+def range_size(r):
+    return r.end - r.start + 1
+
+def to_pandas_range(rng):
+    return pd.date_range(get_date(rng.periodicity,rng.start),
+                get_date(rng.periodicity,rng.end), freq=rng.periodicity)
+
 def parse_date(date):
+    if isinstance(date, datetime.datetime):
+        return date.date()
+    if isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
+        return date.date()
     if isinstance(date, datetime.date):
         return date       
     if isinstance(date, str):
         return datetime.datetime.strptime(date, "%Y-%m-%d").date()
-    if isinstance(date, datetime.datetime):
-        return date.date()
 
 def round_b(date):
     date = parse_date(date)

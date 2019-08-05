@@ -3,7 +3,7 @@ from lima.time import *
 import pandas as pd
 import numpy as np
 
-__all__ = ['read_series','write_series', 'delete_series', 'read_series_metadata']
+__all__ = ['read_series','write_series', 'delete_series', 'read_series_metadata', 'list_series', 'truncate_series']
 
 
 def read_series(key, start=None, end=None, periodicity=None,
@@ -44,7 +44,7 @@ def read_series(key, start=None, end=None, periodicity=None,
         return (start_index, end_index, md.periodicity, output)
     s = pd.Series(output, index=get_date_range(md.periodicity,start_index,end_index), name=key)
     if needs_resample:
-        s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(pd.date_range(start,end, freq=periodicity))       
+        s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(to_pandas_range(get_range(start,end,periodicity)))       
         if not as_series:
             return (get_index(periodicity,s.index[0]), get_index(periodicity,s.index[-1]), periodicity, s.values)
     return s
@@ -60,12 +60,15 @@ def write_series(key, series):
         write(series_key, series_md, data.tostring())
         return
     if series_md.start > saved_md.end:
-        pad = np.full(series_md.start - saved_md.end, TYPES[saved_md.dtype].pad_value)
-        data = np.hstack([pad, np.full])
+        pad = np.full(series_md.start - saved_md.end - 1, TYPES[saved_md.dtype].pad_value)
+        data = np.hstack([pad, data])
         start = saved_md.end + 1
     else:
         start = series_md.start
+    print(data)
+    print(start)
     start_offset = (start - saved_md.start) * np.dtype(saved_md.dtype).itemsize
+    print(start_offset)
     set_data_range(series_key, start_offset, data.tostring())
     if series_md.end > saved_md.end:
         update_end(series_key, series_md.end)
@@ -76,3 +79,14 @@ def delete_series(key):
 def read_series_metadata(key, date_range=None):
     series_key = f'{SERIES_PREFIX}.{key}'
     return read_metadata(series_key)
+
+def truncate_series(key, end_date):
+    series_key = f'{SERIES_PREFIX}.{key}'
+    md = read_metadata(series_key)
+    end_index = get_index(md.periodicity, end_date)
+    if end_index < md.end:
+        update_end(series_key, end_index)
+
+def list_series(match='*'):
+    return [key.decode().replace(SERIES_PREFIX + '.','') for key in list_keys(f'{SERIES_PREFIX}.{match}')]
+

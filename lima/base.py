@@ -100,6 +100,9 @@ def hash_get(key, item=None):
         return get_redis().hmget(key, item)
     return get_redis().hget(key, item)
 
+def list_keys(match='*'):
+    return [key for key in get_redis().scan_iter(match=match)]
+
 _LUA_ARCHIVE = """
     local new_key = string.gsub(KEYS[1],'^l.','l.a.') .. '.' .. redis.call('TIME')[1]
     redis.call("RESTORE", new_key, 0, redis.call("DUMP", KEYS[1]))
@@ -111,3 +114,4 @@ _LUA_ARCHIVE_HASH = hashlib.sha1(REDIS_POOL.get_encoder().encode(_LUA_ARCHIVE)).
 def archive(key):
     #return redis.Redis(connection_pool=REDIS_POOL).eval(_LUA_ARCHIVE, 1, key)
     return redis.Redis(connection_pool=REDIS_POOL).evalsha(_LUA_ARCHIVE_HASH, 1, key)
+
