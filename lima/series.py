@@ -65,10 +65,7 @@ def write_series(key, series):
         start = saved_md.end + 1
     else:
         start = series_md.start
-    print(data)
-    print(start)
     start_offset = (start - saved_md.start) * np.dtype(saved_md.dtype).itemsize
-    print(start_offset)
     set_data_range(series_key, start_offset, data.tostring())
     if series_md.end > saved_md.end:
         update_end(series_key, series_md.end)
