@@ -1,5 +1,3 @@
-from lima.series import *
-from lima.frame import *
-from lima.hash import *
+from lima.client import Lima
 
 name = 'lima'
