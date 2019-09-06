@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from collections import namedtuple
 from redis.connection import UnixDomainSocketConnection
-from pynto.time import *
+import pynto.time as time
 from pynto.main import _Word,Column
 
 SERIES_PREFIX = 'l.s'
@@ -47,7 +47,7 @@ class Lima(object):
     def _get_metadata_for_series(self, series):
         if series.index.freq is None:
             raise Exception('Missing index freq.')
-        start = get_index(series.index.freq.name, series.index[0])
+        start = time.get_index(series.index.freq.name, series.index[0])
         return Metadata(series.dtype.str, series.index.freq.name,
                                 start, start + len(series.index)-1) 
 
@@ -91,8 +91,7 @@ class Lima(object):
     def _list_keys(self, match='*'):
         return [key for key in self._get_redis().scan_iter(match=match)]
 
-    def read_series(self, key, start=None, end=None, periodicity=None,
-                            resample_method='last', as_series=True):
+    def read_series_data(self, key, start=None, end=None, periodicity=None, resample_method='last'):
         series_key = f'{SERIES_PREFIX}.{key}'
         md = self._read_metadata(series_key)
         if md is None:
@@ -100,39 +99,41 @@ class Lima(object):
         needs_resample = not (periodicity is None or periodicity == md.periodicity)
         if needs_resample:
             if not start is None:
-                start_index = get_index(md.periodicity,get_date(periodicity,get_index(periodicity,start)))
+                start_index = time.get_index(md.periodicity,time.get_date(periodicity,time.get_index(periodicity,start)))
             else:
                 start_index = md.start
             if not end is None:
-                end_index = get_index(md.periodicity,get_date(periodicity,get_index(periodicity,end)))
+                end_index = time.get_index(md.periodicity,time.get_date(periodicity,time.get_index(periodicity,end)))
             else:
-                end_index = md.end
+                end_index = md.end + 1
         else:
-            start_index = md.start if start is None else get_index(md.periodicity, start)
-            end_index = md.end if end is None else get_index(md.periodicity, end)
+            start_index = md.start if start is None else time.get_index(md.periodicity, start)
+            end_index = md.end + 1 if end is None else time.get_index(md.periodicity, end)
         periodicity = periodicity if periodicity else md.periodicity
-        if start_index <= md.end and end_index >= md.start:
+        if start_index < md.end and end_index >= md.start:
             itemsize = np.dtype(md.dtype).itemsize 
             selected_start = max(0, start_index - md.start)
-            selected_end = min(end_index, md.end) - md.start + 1
+            selected_end = min(end_index, md.end + 2) - md.start
             buff = self._get_data_range(series_key, selected_start * itemsize, selected_end * itemsize)
             data = np.frombuffer(buff, md.dtype)
-            if len(data) != end_index - start_index + 1:
+            if len(data) != end_index - start_index:
                 output_start = max(0, md.start - start_index)
-                output = np.full(end_index - start_index + 1,TYPES[md.dtype].pad_value)
+                output = np.full(end_index - start_index,TYPES[md.dtype].pad_value)
                 output[output_start:output_start+len(data)] = data
             else:
                 output = data
         else:
-            output = np.full(end_index - start_index + 1,TYPES[md.dtype].pad_value)
-        if not (as_series or needs_resample):
-            return (start_index, end_index, md.periodicity, output)
-        s = pd.Series(output, index=Range(start_index,end_index,md.periodicity).to_pandas(), name=key)
+            output = np.full(end_index - start_index,TYPES[md.dtype].pad_value)
         if needs_resample:
-            s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(Range(start,end,periodicity).to_pandas())       
-            if not as_series:
-                return (get_index(periodicity,s.index[0]), get_index(periodicity,s.index[-1]), periodicity, s.values)
-        return s
+            s = pd.Series(output, index=time.get_datetimeindex(md.periodicity, start_index,end_index), name=key)
+            s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(time.get_datetimeindex(periodicity, start,end))       
+            return (get_index(periodicity,s.index[0]), get_index(periodicity,s.index[-1]), periodicity, s.values)
+        else:
+            return (start_index, end_index, md.periodicity, output)
+
+    def read_series(self, key, start=None, end=None, periodicity=None, resample_method='last'):
+        data = self.read_series_data(key, start, end, periodicity, resample_method)
+        return pd.Series(data[3], index=time.get_datetimeindex(data[2],data[0],data[1]), name=key)
 
     def write_series(self, key, series):
         series_key = f'{SERIES_PREFIX}.{key}'
@@ -144,7 +145,7 @@ class Lima(object):
         if saved_md is None or series_md.start < saved_md.start:
             self._write(series_key, series_md, data.tostring())
             return
-        if series_md.start > saved_md.end:
+        if series_md.start > saved_md.end + 1:
             pad = np.full(series_md.start - saved_md.end - 1, TYPES[saved_md.dtype].pad_value)
             data = np.hstack([pad, data])
             start = saved_md.end + 1
@@ -152,7 +153,7 @@ class Lima(object):
             start = series_md.start
         start_offset = (start - saved_md.start) * np.dtype(saved_md.dtype).itemsize
         self._set_data_range(series_key, start_offset, data.tostring())
-        if series_md.end > saved_md.end:
+        if series_md.end > saved_md.end + 1:
             self._update_end(series_key, series_md.end)
 
     def delete_series(self, key):
@@ -179,8 +180,7 @@ class Lima(object):
     def read_frame_series_keys(self, key):
         return [f'{key}.{c}' for c in self.read_frame_headers(key)]
 
-    def read_frame(self, key, start=None, end=None, periodicity=None,
-                            resample_method='last', as_frame=True):
+    def read_frame_data(self, key, start=None, end=None, periodicity=None, resample_method='last'):
         frame_key = f'{FRAME_PREFIX}.{key}'
         md = self._read_metadata(frame_key)
         if md is None:
@@ -189,26 +189,28 @@ class Lima(object):
         end = md.end if end is None else get_index(md.periodicity, end)
         periodicity = md.periodicity if periodicity is None else periodicity
         columns = self.read_frame_headers(key)
-        data = np.column_stack([self.read_series(f'{key}.{c}', start, end, periodicity,
-                    resample_method, as_series=False)[3] for c in columns])
-        if not as_frame:
-            return data
-        return pd.DataFrame(data, columns=columns,
-                    index=Range(start, end, periodicity).to_pandas())
+        data = np.column_stack([self.read_series_data(f'{key}.{c}', start, end, periodicity,
+                    resample_method)[3] for c in columns])
+        return (start, end, periodicity, columns, data)
+
+    def read_frame(self, key, start=None, end=None, periodicity=None, resample_method='last'):
+        data = self.read_frame_data(key, start, end, periodicity, resample_method)
+        return pd.DataFrame(data[4], columns=data[3],
+                    index=time.get_datetimeindex(data[2], data[0], data[1]))
 
     def write_frame(self, key, frame):
         frame_key = f'{FRAME_PREFIX}.{key}'
         md = self._read_metadata(frame_key)
-        end = get_index(frame.index.freq.name, frame.index[-1].date())
+        end = time.get_index(frame.index.freq.name, frame.index[-1].date()) + 1
         if md is None:
-            start = get_index(frame.index.freq.name, frame.index[0].date())
+            start = time.get_index(frame.index.freq.name, frame.index[0].date())
             md = Metadata('<U', frame.index.freq.name, start, end)
             columns = set()
             first_save = True
         else:
             if md.periodicity != frame.index.freq.name:
                 raise Exception('Incompatible periodicity.')
-            columns = set(get_data_range(frame_key, 0, -1).decode().split('\t'))
+            columns = set(self._get_data_range(frame_key, 0, -1).decode().split('\t'))
             if end > md.end:
                 self._update_end(frame_key, end)
             first_save = False
@@ -237,7 +239,7 @@ class Lima(object):
     def truncate_frame(self, key, end_date):
         frame_key = f'{FRAME_PREFIX}.{key}'
         md = self._read_metadata(frame_key)
-        end_index = get_index(md.periodicity, end_date)
+        end_index = time.get_index(md.periodicity, end_date)
         if end_index < md.end:
             self._update_end(frame_key, end_index)
 
@@ -264,24 +266,30 @@ class Lima(object):
         self._delete(f'{HASH_PREFIX}.{key}')
 
     def series_col(self, series_key):
-        return _PyntoSeries(self, series_key)
+        return _PyntoSeries(self, 'lima_col')(series_key)
 
     def frame_cols(self, frame_key):
-        return _PyntoFrame(self, frame_key)
-
-class _PyntoSeries(_Word):
-    def __init__(self, lima, series_key):
-        def lima_series(stack):
-            def lima_col(date_range, lima=lima, series_key=series_key):
-                return lima.read_series(series_key, date_range.start, date_range.end, date_range.periodicity, as_series=False)[3]
-            stack.append(Column(series_key, f'lima series:{series_key}', lima_col))
-        super().__init__(lima_series)
+        return _PyntoFrame(self, 'lima_frame')(frame_key)
 
 class _PyntoFrame(_Word):
-    def __init__(self, lima, frame_key):
-        def lima_frame(stack):
-            for header in lima.read_frame_headers(frame_key):
-                def lima_col(date_range, lima=lima, series_key=f'{frame_key}.{header}'):
-                    return lima.read_series(series_key, date_range.start, date_range.end, date_range.periodicity, as_series=False)[3]
-                stack.append(Column(header, f'{frame_key}:{header}', lima_col))
-        super().__init__(lima_frame)
+    def __init__(self, lima, name):
+        self.lima = lima
+        super().__init__(name)
+    def __call__(self, frame_key): return super().__call__(locals())
+    def _operation(self, stack, args):
+        for header in self.lima.read_frame_headers(args['frame_key']):
+            def lima_col(date_range, series_key=f'{frame_key}.{header}'):
+                return self.lima.read_series_data(series_key, date_range.start, date_range.end, date_range.periodicity)[3]
+            stack.append(Column(header, f'{args["frame_key"]}:{header}', lima_col))
+
+class _PyntoSeries(_Word):
+    def __init__(self, lima, name):
+        self.lima = lima
+        super().__init__(name)
+    def __call__(self, series_key): return super().__call__(locals())
+
+    def _operation(self, stack, args):
+        def lima_col(date_range, series_key=args['series_key']):
+            return self.lima.read_series_data(series_key, date_range.start, date_range.end, date_range.periodicity)[3]
+        stack.append(Column(args['series_key'], f'lima series:{args["series_key"]}', lima_col))
+
