@@ -33,6 +33,9 @@ class Lima(object):
             self._pool = redis.ConnectionPool(host=host, port=port, db=db, password=password) 
         else:
             self._pool = redis.ConnectionPool(connection_class=UnixDomainSocketConnection,path=socket_path, db=db, password=password) 
+
+    def __deepcopy__(self, memo):
+        return self
     
     def _get_redis(self):
         return redis.Redis(connection_pool=self._pool)
@@ -127,7 +130,7 @@ class Lima(object):
         if needs_resample:
             s = pd.Series(output, index=time.get_datetimeindex(md.periodicity, start_index,end_index), name=key)
             s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(time.get_datetimeindex(periodicity, start,end))       
-            return (get_index(periodicity,s.index[0]), get_index(periodicity,s.index[-1]), periodicity, s.values)
+            return (time.get_index(periodicity,s.index[0]), time.get_index(periodicity,s.index[-1]), periodicity, s.values)
         else:
             return (start_index, end_index, md.periodicity, output)
 
