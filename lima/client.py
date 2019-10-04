@@ -102,10 +102,10 @@ class Lima(object):
                 end_index = get_index(md.periodicity,
                         get_date(periodicity,get_index(periodicity,stop)))
             else:
-                end_index = md.end + 1
+                end_index = md.end
         else:
             start_index = md.start if start is None else get_index(md.periodicity, start)
-            end_index = md.end + 1 if stop is None else get_index(md.periodicity, stop)
+            end_index = md.end if stop is None else get_index(md.periodicity, stop)
         periodicity = periodicity if periodicity else md.periodicity
         if start_index < md.end and end_index >= md.start:
             itemsize = np.dtype(md.dtype).itemsize 
@@ -124,7 +124,7 @@ class Lima(object):
         if needs_resample:
             s = pd.Series(output, index=Range.from_dates(
                             start_index,end_index,md.periodicity).to_index(), name=key)
-            s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(get_datetimeindex(periodicity, start, stop))
+            s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(Range.from_dates(start, stop, periodicity).to_index())
             return (get_index(periodicity,s.index[0]), get_index(periodicity,s.index[-1]), periodicity, s.values)
         else:
             return (start_index, end_index, md.periodicity, output)
@@ -132,7 +132,7 @@ class Lima(object):
     def read_series(self, key, start=None, stop=None,
                         periodicity=None, resample_method='last'):
         data = self.read_series_data(key, start, stop, periodicity, resample_method)
-        return pd.Series(data[3], index=get_datetimeindex(data[2],data[0],data[1]), name=key)
+        return pd.Series(data[3], index=Range.from_dates(*data[:3]).to_index(), name=key)
 
     def write_series(self, key, series):
         if series.index.freq is None:
