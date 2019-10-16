@@ -268,7 +268,13 @@ class _PyntoSeries(_Word):
             else:
                 data = args['lima'].read_series_data(key)
                 values = data[3][row_range.start: row_range.stop: row_range.step]
-                row_range.start = data[0] + (row_range.start if row_range.start else 0)
+                if row_range.start is None:
+                    row_range.start = data[0]
+                elif row_range.start < 0:
+                    row_range.start = data[1] + row_range.start
+                else:
+                    row_range.start = data[0] + row_range.start
+
                 if row_range.stop is None:
                     row_range.stop = data[1]
                 elif row_range.stop < 0:
