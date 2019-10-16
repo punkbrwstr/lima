@@ -89,7 +89,6 @@ class Lima(object):
     def read_series_data(self, key, start=None, stop=None,
                             periodicity=None, resample_method='last'):
         md = self.read_metadata(key)
-        print(stop)
         if md is None:
             raise KeyError(f'No series data for key: "{key}".')
         needs_resample = not (periodicity is None or periodicity == md.periodicity)
