@@ -89,6 +89,7 @@ class Lima(object):
     def read_series_data(self, key, start=None, stop=None,
                             periodicity=None, resample_method='last'):
         md = self.read_metadata(key)
+        print(stop)
         if md is None:
             raise KeyError(f'No series data for key: "{key}".')
         needs_resample = not (periodicity is None or periodicity == md.periodicity)
@@ -100,7 +101,7 @@ class Lima(object):
                 start_index = md.start
             if not stop is None:
                 end_index = get_index(md.periodicity,
-                        get_date(periodicity,get_index(periodicity,stop)))
+                        get_date(periodicity,get_index(periodicity,stop))) 
             else:
                 end_index = md.end
         else:
@@ -155,7 +156,7 @@ class Lima(object):
             start = series_md.start
         start_offset = (start - saved_md.start) * np.dtype(saved_md.dtype).itemsize
         self._set_data_range(key, start_offset, data.tostring())
-        if series_md.end > saved_md.end + 1:
+        if series_md.end > saved_md.end:
             self._update_end(key, series_md.end)
 
     def delete_series(self, key):
