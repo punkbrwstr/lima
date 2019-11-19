@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="lima-punkbrwstr",
-    version="0.0.1",
+    version="0.0.2",
     author="Peter Graf",
     author_email="magnumpi@gmail.com",
     description="Column-oriented time series data store in Redis",
