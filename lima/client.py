@@ -242,7 +242,7 @@ class _PyntoFrame(_Word):
     def _operation(self, stack, args):
         for header in args['lima'].read_frame_headers(args['key']):
             def lima_col(row_range, key=f'{args["key"]}:{header}'):
-                if row_range.type == 'datetime':
+                if row_range.range_type == 'datetime':
                     return args['lima'].read_series_data(key, row_range.start,
                                     row_range.stop, row_range.step)[3]
                 else:
@@ -251,7 +251,7 @@ class _PyntoFrame(_Word):
                     row_range.start = data[0]
                     row_range.stop = data[1]
                     row_range.step = data[2]
-                    row_range.type = 'datetime'
+                    row_range.range_type = 'datetime'
                     return values
             stack.append(Column(header, f'{args["key"]}:{header}', lima_col))
 
@@ -262,7 +262,7 @@ class _PyntoSeries(_Word):
 
     def _operation(self, stack, args):
         def lima_col(date_range, key=args['key']):
-            if row_range.type == 'datetime':
+            if row_range.range_type == 'datetime':
                 return args['lima'].read_series_data(key, row_range.start,
                                 row_range.stop, row_range.step)[3]
             else:
@@ -282,7 +282,7 @@ class _PyntoSeries(_Word):
                 else:
                     row_range.stop = data[0] + row_range.stop
                 row_range.step = data[2]
-                row_range.type = 'datetime'
+                row_range.range_type = 'datetime'
                 return values
         stack.append(Column(args['key'], f'lima series:{args["key"]}', lima_col))
 
