@@ -261,7 +261,7 @@ class _PyntoSeries(_Word):
     def __call__(self, lima, key): return super().__call__(locals())
 
     def _operation(self, stack, args):
-        def lima_col(date_range, key=args['key']):
+        def lima_col(row_range, key=args['key']):
             if row_range.range_type == 'datetime':
                 return args['lima'].read_series_data(key, row_range.start,
                                 row_range.stop, row_range.step)[3]
