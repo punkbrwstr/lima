@@ -53,7 +53,7 @@ class Lima(object):
     def read_metadata(self, key):
         data = self.get_binary_connection().getrange(key,0,METADATA_SIZE-1)
         if len(data) == 0:
-            return None
+            raise KeyError(f'No metadata for key {key}')
         s = struct.unpack(METADATA_FORMAT, data)
         return Metadata(s[0].decode().strip(), s[1].decode().strip(), s[2], s[3])
 
@@ -140,9 +140,12 @@ class Lima(object):
         start = get_index(series.index.freq.name, series.index[0])
         series_md = Metadata(series.dtype.str, series.index.freq.name,
                                 start, start + len(series.index)) 
-        saved_md = self.read_metadata(key)
-        if saved_md and saved_md.periodicity != series_md.periodicity:
-            raise Exception(f'Incompatible periodicity.')   
+        try:
+            saved_md = self.read_metadata(key)
+            if saved_md.periodicity != series_md.periodicity:
+                raise Exception(f'Incompatible periodicity.')   
+        except:
+            saved_md = None
         data = series.values
         if saved_md is None or series_md.start < saved_md.start:
             self._write(key, series_md, data.tostring())
@@ -175,8 +178,6 @@ class Lima(object):
 
     def read_frame_data(self, key, start=None, end=None, periodicity=None, resample_method='last'):
         md = self.read_metadata(key)
-        if md is None:
-            raise KeyError(f'No frame data for key: "{key}".')
         start = md.start if start is None else get_index(md.periodicity, start)
         end = md.end if end is None else get_index(md.periodicity, end)
         periodicity = md.periodicity if periodicity is None else periodicity
@@ -191,20 +192,20 @@ class Lima(object):
                     index=Range.from_dates(*data[:3]).to_index())
 
     def write_frame(self, key, frame):
-        md = self.read_metadata(key)
         end = get_index(frame.index.freq.name, frame.index[-1].date()) + 1
-        if md is None:
-            start = get_index(frame.index.freq.name, frame.index[0].date())
-            md = Metadata('<U', frame.index.freq.name, start, end)
-            columns = set()
-            first_save = True
-        else:
+        try:
+            md = self.read_metadata(key)
             if md.periodicity != frame.index.freq.name:
                 raise Exception('Incompatible periodicity.')
             columns = set(self._get_data_range(key, 0, -1).decode().split('\t'))
             if end > md.end:
                 self._update_end(key, end)
             first_save = False
+        except KeyError:
+            start = get_index(frame.index.freq.name, frame.index[0].date())
+            md = Metadata('<U', frame.index.freq.name, start, end)
+            columns = set()
+            first_save = True
         new_columns = []
         for column,series in frame.iteritems():
             series_code = f'{key}:{column}'
