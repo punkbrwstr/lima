@@ -170,6 +170,10 @@ class Lima(object):
         if end_index < md.end:
             self._update_end(key, end_index)
 
+    def read_range(self, key):
+        md = self.read_metadata(key)
+        return Range.from_indicies(md.start, md.end,md.periodicity)
+        
     def read_frame_headers(self, key):
         return self._get_data_range(key, 0, -1).decode().split('\t')
 
