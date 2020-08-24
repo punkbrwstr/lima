@@ -124,7 +124,7 @@ class Lima(object):
         if needs_resample:
             s = pd.Series(output, index=Range.from_dates(
                             start_index,end_index,md.periodicity).to_index(), name=key)
-            s = getattr(s.ffill().resample(periodicity),resample_method)().reindex(Range.from_dates(start, stop, periodicity).to_index())
+            s = getattr(s.resample(periodicity),resample_method)().reindex(Range.from_dates(start, stop, periodicity).to_index())
             return (get_index(periodicity,s.index[0]), get_index(periodicity,s.index[-1]), periodicity, s.values)
         else:
             return (start_index, end_index, md.periodicity, output)
