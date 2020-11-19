@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="lima-punkbrwstr",
-    version="0.0.2",
+    version="0.0.3",
     author="Peter Graf",
     author_email="magnumpi@gmail.com",
     description="Column-oriented time series data store in Redis",
@@ -15,7 +15,9 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     install_requires=[
         'redis',
-        'hiredis'
+        'hiredis',
+        'pandas',
+        'numpy'
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
