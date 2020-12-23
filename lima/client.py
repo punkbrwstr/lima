@@ -20,6 +20,11 @@ METADATA_SIZE = struct.calcsize(METADATA_FORMAT)
 
 Metadata = namedtuple('Metadata', ['dtype','periodicity','start','end'])
 
+def get_client():
+    global _CLIENT
+    if not '_CLIENT' in globals():
+        _CLIENT = Lima()
+    return _CLIENT
 
 class Lima(object):
 
@@ -240,54 +245,45 @@ class Lima(object):
     def frame(self, key):
         return _PyntoFrame('frame')(self, key)
 
+def _lima_col(row_range, args):
+    if row_range.range_type == 'datetime':
+        return get_client().read_series_data(args['key'], row_range.start,
+                        row_range.stop, row_range.step)[3]
+    else:
+        data = get_client.read_series_data(args['key'])
+        values = data[3][row_range.start: row_range.stop: row_range.step]
+        if row_range.start is None:
+            row_range.start = data[0]
+        elif row_range.start < 0:
+            row_range.start = data[1] + row_range.start
+        else:
+            row_range.start = data[0] + row_range.start
+
+        if row_range.stop is None:
+            row_range.stop = data[1]
+        elif row_range.stop < 0:
+            row_range.stop = data[1] + row_range.stop
+        else:
+            row_range.stop = data[0] + row_range.stop
+        row_range.step = data[2]
+        row_range.range_type = 'datetime'
+        return values
+
 class _PyntoFrame(_Word):
     def __init__(self, name):
         super().__init__(name)
-    def __call__(self, lima, key): return super().__call__(locals())
+    def __call__(self, key): return super().__call__(locals())
     def _operation(self, stack, args):
-        for header in args['lima'].read_frame_headers(args['key']):
-            def lima_col(row_range, key=f'{args["key"]}:{header}'):
-                if row_range.range_type == 'datetime':
-                    return args['lima'].read_series_data(key, row_range.start,
-                                    row_range.stop, row_range.step)[3]
-                else:
-                    data = args['lima'].read_series_data(key)
-                    values = data[3][row_range.start: row_range.stop: row_range.step]
-                    row_range.start = data[0]
-                    row_range.stop = data[1]
-                    row_range.step = data[2]
-                    row_range.range_type = 'datetime'
-                    return values
-            stack.append(Column(header, f'{args["key"]}:{header}', lima_col))
+        for header in get_client().read_frame_headers(args['key']):
+            col_args = args.copy()
+            col_args.update({'key': f'{args["key"]}:{header}'})
+            stack.append(Column(header, f'{args["key"]}:{header}', _lima_col, col_args))
 
 class _PyntoSeries(_Word):
     def __init__(self, name):
         super().__init__(name)
-    def __call__(self, lima, key): return super().__call__(locals())
+    def __call__(self, key): return super().__call__(locals())
 
     def _operation(self, stack, args):
-        def lima_col(row_range, key=args['key']):
-            if row_range.range_type == 'datetime':
-                return args['lima'].read_series_data(key, row_range.start,
-                                row_range.stop, row_range.step)[3]
-            else:
-                data = args['lima'].read_series_data(key)
-                values = data[3][row_range.start: row_range.stop: row_range.step]
-                if row_range.start is None:
-                    row_range.start = data[0]
-                elif row_range.start < 0:
-                    row_range.start = data[1] + row_range.start
-                else:
-                    row_range.start = data[0] + row_range.start
-
-                if row_range.stop is None:
-                    row_range.stop = data[1]
-                elif row_range.stop < 0:
-                    row_range.stop = data[1] + row_range.stop
-                else:
-                    row_range.stop = data[0] + row_range.stop
-                row_range.step = data[2]
-                row_range.range_type = 'datetime'
-                return values
-        stack.append(Column(args['key'], f'lima series:{args["key"]}', lima_col))
+        stack.append(Column(args['key'], f'lima series:{args["key"]}', _lima_col, args))
 
